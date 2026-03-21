@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.ocr-cache/
+output/
+testset/cache/
+testset/runs/
+testset/pdfs/
