@@ -15,9 +15,31 @@ Convert academic PDFs (local or URL) into Kindle-friendly EPUBs using OCR + Pand
 
 - Python 3.10+
 - `pandoc` in PATH
-- Python dependencies:
+
+## Python environment setup (recommended)
+
+If you are new to Python, set up an isolated environment first.
+
+### Option A: `venv` (built into Python)
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+When you are done:
+
+```bash
+deactivate
+```
+
+### Option B: `conda`
+
+```bash
+conda create -n pdf-to-epub python=3.11 -y
+conda activate pdf-to-epub
 pip install -r requirements.txt
 ```
 
