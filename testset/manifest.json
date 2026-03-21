@@ -1,0 +1,230 @@
+{
+  "version": 1,
+  "description": "PDF to EPUB benchmark set focused on Kindle reading quality",
+  "cases": [
+    {
+      "id": "attention_is_all_you_need",
+      "title": "Attention Is All You Need",
+      "pdf_file": "pdfs/1706.03762.pdf",
+      "source_url": "https://arxiv.org/pdf/1706.03762.pdf",
+      "expectations": {
+        "two_column_pdf": true,
+        "has_math": true,
+        "min_image_files": 4,
+        "required_phrases": [
+          "Attention Is All You Need",
+          "Abstract",
+          "Introduction",
+          "Conclusion",
+          "References"
+        ],
+        "ordered_phrases": [
+          "Abstract",
+          "Introduction",
+          "Conclusion",
+          "References"
+        ]
+      }
+    },
+    {
+      "id": "bert_pretraining",
+      "title": "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding",
+      "pdf_file": "pdfs/1810.04805.pdf",
+      "source_url": "https://arxiv.org/pdf/1810.04805.pdf",
+      "expectations": {
+        "two_column_pdf": true,
+        "has_math": true,
+        "min_image_files": 4,
+        "required_phrases": [
+          "BERT",
+          "Abstract",
+          "Introduction",
+          "Conclusion",
+          "References"
+        ],
+        "ordered_phrases": [
+          "Abstract",
+          "Introduction",
+          "Conclusion",
+          "References"
+        ]
+      }
+    },
+    {
+      "id": "resnet",
+      "title": "Deep Residual Learning for Image Recognition",
+      "pdf_file": "pdfs/1512.03385.pdf",
+      "source_url": "https://arxiv.org/pdf/1512.03385.pdf",
+      "expectations": {
+        "two_column_pdf": true,
+        "has_math": true,
+        "min_image_files": 6,
+        "required_phrases": [
+          "Deep Residual Learning",
+          "Abstract",
+          "Introduction",
+          "References"
+        ],
+        "ordered_phrases": [
+          "Abstract",
+          "Introduction",
+          "References"
+        ]
+      }
+    },
+    {
+      "id": "vision_transformer",
+      "title": "An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale",
+      "pdf_file": "pdfs/2010.11929.pdf",
+      "source_url": "https://arxiv.org/pdf/2010.11929.pdf",
+      "expectations": {
+        "two_column_pdf": true,
+        "has_math": true,
+        "min_image_files": 5,
+        "required_phrases": [
+          "Transformers for Image Recognition",
+          "Abstract",
+          "Introduction",
+          "References"
+        ],
+        "ordered_phrases": [
+          "Abstract",
+          "Introduction",
+          "References"
+        ]
+      }
+    },
+    {
+      "id": "clip",
+      "title": "Learning Transferable Visual Models From Natural Language Supervision",
+      "pdf_file": "pdfs/2103.00020.pdf",
+      "source_url": "https://arxiv.org/pdf/2103.00020.pdf",
+      "expectations": {
+        "two_column_pdf": true,
+        "has_math": true,
+        "min_image_files": 5,
+        "required_phrases": [
+          "Natural Language Supervision",
+          "Abstract",
+          "Introduction",
+          "References"
+        ],
+        "ordered_phrases": [
+          "Abstract",
+          "Introduction",
+          "References"
+        ]
+      }
+    },
+    {
+      "id": "diffusion_models",
+      "title": "Denoising Diffusion Probabilistic Models",
+      "pdf_file": "pdfs/2006.11239.pdf",
+      "source_url": "https://arxiv.org/pdf/2006.11239.pdf",
+      "expectations": {
+        "two_column_pdf": true,
+        "has_math": true,
+        "min_image_files": 4,
+        "required_phrases": [
+          "Denoising Diffusion Probabilistic Models",
+          "Abstract",
+          "Introduction",
+          "References"
+        ],
+        "ordered_phrases": [
+          "Abstract",
+          "Introduction",
+          "References"
+        ]
+      }
+    },
+    {
+      "id": "llama2",
+      "title": "Llama 2: Open Foundation and Fine-Tuned Chat Models",
+      "pdf_file": "pdfs/2307.09288.pdf",
+      "source_url": "https://arxiv.org/pdf/2307.09288.pdf",
+      "expectations": {
+        "two_column_pdf": true,
+        "has_math": true,
+        "min_image_files": 4,
+        "required_phrases": [
+          "Llama 2",
+          "Abstract",
+          "Introduction",
+          "References"
+        ],
+        "ordered_phrases": [
+          "Abstract",
+          "Introduction",
+          "References"
+        ]
+      }
+    },
+    {
+      "id": "gpt4_technical_report",
+      "title": "GPT-4 Technical Report",
+      "pdf_file": "pdfs/2303.08774.pdf",
+      "source_url": "https://arxiv.org/pdf/2303.08774.pdf",
+      "expectations": {
+        "two_column_pdf": true,
+        "has_math": false,
+        "min_image_files": 2,
+        "required_phrases": [
+          "GPT-4 Technical Report",
+          "Abstract",
+          "Introduction",
+          "References"
+        ],
+        "ordered_phrases": [
+          "Abstract",
+          "Introduction",
+          "References"
+        ]
+      }
+    },
+    {
+      "id": "instructgpt",
+      "title": "Training language models to follow instructions with human feedback",
+      "pdf_file": "pdfs/2203.02155.pdf",
+      "source_url": "https://arxiv.org/pdf/2203.02155.pdf",
+      "expectations": {
+        "two_column_pdf": true,
+        "has_math": false,
+        "min_image_files": 3,
+        "required_phrases": [
+          "follow instructions",
+          "Abstract",
+          "Introduction",
+          "References"
+        ],
+        "ordered_phrases": [
+          "Abstract",
+          "Introduction",
+          "References"
+        ]
+      }
+    },
+    {
+      "id": "chain_of_thought",
+      "title": "Chain-of-Thought Prompting Elicits Reasoning in Large Language Models",
+      "pdf_file": "pdfs/2201.11903.pdf",
+      "source_url": "https://arxiv.org/pdf/2201.11903.pdf",
+      "expectations": {
+        "two_column_pdf": true,
+        "has_math": false,
+        "min_image_files": 3,
+        "required_phrases": [
+          "Chain-of-Thought",
+          "Abstract",
+          "Introduction",
+          "References"
+        ],
+        "ordered_phrases": [
+          "Abstract",
+          "Introduction",
+          "References"
+        ]
+      }
+    }
+  ]
+}
