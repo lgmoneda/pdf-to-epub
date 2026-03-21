@@ -15,9 +15,31 @@ Convert academic PDFs (local or URL) into Kindle-friendly EPUBs using OCR + Pand
 
 - Python 3.10+
 - `pandoc` in PATH
-- Python dependencies:
+
+## Python environment setup (recommended)
+
+If you are new to Python, set up an isolated environment first.
+
+### Option A: `venv` (built into Python)
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+When you are done:
+
+```bash
+deactivate
+```
+
+### Option B: `conda`
+
+```bash
+conda create -n pdf-to-epub python=3.11 -y
+conda activate pdf-to-epub
 pip install -r requirements.txt
 ```
 
@@ -30,14 +52,17 @@ Optional but recommended:
 
 The converter uses Mistral OCR for document extraction.
 
-1. Create or get your API key from Mistral.
-2. Export it in your shell:
+You can get started on Mistral's free tier.
+
+1. Create an account (or sign in) at: https://console.mistral.ai/home
+2. Create an API key in the console.
+3. Export it in your shell:
 
 ```bash
 export MISTRAL_API_KEY="your_key_here"
 ```
 
-3. (Optional) persist it in your shell profile:
+4. (Optional) persist it in your shell profile:
 
 ```bash
 echo 'export MISTRAL_API_KEY="your_key_here"' >> ~/.zshrc
