@@ -30,14 +30,17 @@ Optional but recommended:
 
 The converter uses Mistral OCR for document extraction.
 
-1. Create or get your API key from Mistral.
-2. Export it in your shell:
+You can get started on Mistral's free tier.
+
+1. Create an account (or sign in) at: https://console.mistral.ai/home
+2. Create an API key in the console.
+3. Export it in your shell:
 
 ```bash
 export MISTRAL_API_KEY="your_key_here"
 ```
 
-3. (Optional) persist it in your shell profile:
+4. (Optional) persist it in your shell profile:
 
 ```bash
 echo 'export MISTRAL_API_KEY="your_key_here"' >> ~/.zshrc
