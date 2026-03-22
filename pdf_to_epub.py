@@ -7,6 +7,8 @@ import os
 import re
 import subprocess
 import sys
+import zipfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote_to_bytes, urljoin, urlparse
@@ -665,6 +667,30 @@ def create_markdown_from_html(
     return output_path
 
 
+def _read_epub_metadata_title(epub_file: str | Path) -> str | None:
+    epub_path = Path(epub_file)
+    if not epub_path.exists():
+        return None
+
+    try:
+        with zipfile.ZipFile(epub_path, "r") as archive:
+            container = ET.fromstring(archive.read("META-INF/container.xml"))
+            rootfile = container.find(".//{*}rootfile")
+            if rootfile is None:
+                return None
+            opf_path = rootfile.attrib.get("full-path")
+            if not opf_path:
+                return None
+
+            opf = ET.fromstring(archive.read(opf_path))
+            title_element = opf.find(".//{*}metadata/{*}title")
+            if title_element is None or not title_element.text:
+                return None
+            return title_element.text.strip()
+    except Exception:
+        return None
+
+
 def markdown_to_epub(
     md_file: str | Path,
     epub_file: str | Path,
@@ -788,6 +814,7 @@ def process_input(
                     "title": title,
                     "markdown_file": str(markdown_path.resolve()),
                     "epub_file": str(epub_path.resolve()),
+                    "epub_metadata_title": _read_epub_metadata_title(epub_path),
                     "cache_hit": False,
                     "case_id": resolved_case_id,
                     "pipeline": "arxiv_html",
@@ -834,6 +861,7 @@ def process_input(
         "title": title,
         "markdown_file": str(markdown_path.resolve()),
         "epub_file": str(epub_path.resolve()),
+        "epub_metadata_title": _read_epub_metadata_title(epub_path),
         "cache_hit": cache_hit,
         "case_id": resolved_case_id,
         "pipeline": "pdf_ocr",
