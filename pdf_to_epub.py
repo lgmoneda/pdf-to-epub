@@ -136,6 +136,12 @@ def _fetch_arxiv_html_document(input_source: str, timeout_seconds: int = 20) -> 
 def _normalize_arxiv_html_document(html_document: str) -> str:
     normalized = re.sub(r"<base\b[^>]*>", "", html_document, flags=re.IGNORECASE)
     normalized = re.sub(r"<base\b[^>]*/>", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(
+        r"alt=[\"']Refer to caption[\"']",
+        "alt=\"\"",
+        normalized,
+        flags=re.IGNORECASE,
+    )
     return normalized
 
 
@@ -449,6 +455,9 @@ def _normalize_markdown_images(markdown: str) -> str:
         image_name = Path(image_target).name
         image_stem = Path(image_name).stem
 
+        if alt_text.lower() == "refer to caption":
+            return f"![]({image_target})"
+
         if alt_text in {image_name, image_stem} or FILENAME_ALT_RE.match(alt_text):
             return f"![]({image_target})"
 
@@ -536,6 +545,8 @@ def _cleanup_arxiv_markdown(markdown: str, html_source_url: str | None = None) -
         lines = lines[first_heading_index:]
 
     cleaned_lines: list[str] = []
+    in_references = False
+
     for line in lines:
         stripped = line.strip()
         if ARXIV_NAVIGATION_LINE_RE.match(stripped):
@@ -544,20 +555,58 @@ def _cleanup_arxiv_markdown(markdown: str, html_source_url: str | None = None) -
         fence_with_id_match = COLON_FENCE_WITH_ID_RE.match(stripped)
         if fence_with_id_match:
             cleaned_lines.append(f"<a id=\"{fence_with_id_match.group(1)}\"></a>")
+            cleaned_lines.append("")
             continue
 
         if COLON_FENCE_LINE_RE.match(stripped):
             continue
 
-        normalized_line = MARKDOWN_ATTRIBUTE_BLOCK_RE.sub("", line)
+        anchor_ids = re.findall(r"\{#([^\s}]+)[^}]*\}", line)
+        normalized_line = re.sub(r"\{#([^\s}]+)[^}]*\}", "", line)
+        normalized_line = MARKDOWN_ATTRIBUTE_BLOCK_RE.sub("", normalized_line)
+
+        for anchor_id in anchor_ids:
+            if not anchor_id.startswith("your-spending-needs-attention"):
+                cleaned_lines.append(f"<a id=\"{anchor_id}\"></a>")
+
+        normalized_line = re.sub(r"\[\[([^\[\]]+)\]\]\((#[^)]+)\)", r"[\1](\2)", normalized_line)
+        normalized_line = re.sub(r"\[\[([^\[\]]+)\]\]", r"\1", normalized_line)
+
+        normalized_line = re.sub(r"\[(\s*)\[(\s*)", "[", normalized_line)
+        normalized_line = re.sub(r"(\s*)\](\s*)\]", "]", normalized_line)
+        normalized_line = re.sub(r"\]\s*\[", " ", normalized_line)
+
         normalized_line = re.sub(r"^\s*\[\(\d+\)\]\s*(\$\$.*\$\$)\s*$", r"\1", normalized_line)
         normalized_line = re.sub(r"(\$\$[^$]+)\.(\$\$)", r"\1\2", normalized_line)
 
         if re.fullmatch(r"[\s\|+\-]{5,}", normalized_line):
             continue
 
-        normalized_line = re.sub(r"\s{2,}", " ", normalized_line)
-        cleaned_lines.append(normalized_line.rstrip())
+        if re.fullmatch(r"\s*-\s*[•\-–]+\s*", normalized_line):
+            continue
+
+        if re.fullmatch(r"\s*-\s*\(\d+\)\s*", normalized_line):
+            continue
+
+        if re.fullmatch(r"\s*-\s*\[\s*\]\s*", normalized_line):
+            continue
+
+        normalized_line = re.sub(r"\s{2,}", " ", normalized_line).rstrip()
+
+        if normalized_line == "## References":
+            in_references = True
+
+        if in_references and normalized_line.startswith("-"):
+            reference_line = normalized_line[1:].strip()
+            reference_segments = [segment.strip() for segment in re.findall(r"\[([^\[\]]+)\]", reference_line)]
+            if reference_segments:
+                compact_segments = [segment for segment in reference_segments if segment]
+                if compact_segments and compact_segments[0].startswith("(") and len(compact_segments) == 1:
+                    continue
+                if compact_segments:
+                    normalized_line = "- " + " ".join(compact_segments)
+
+        cleaned_lines.append(normalized_line)
 
     cleaned_markdown = "\n".join(cleaned_lines)
     cleaned_markdown = re.sub(r"\n{3,}", "\n\n", cleaned_markdown).strip()
