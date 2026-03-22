@@ -648,7 +648,7 @@ def process_input(
     include_title_page: bool = False,
     force_pdf: bool = False,
 ) -> dict[str, Any]:
-    output_path = Path(output_dir)
+    output_path = Path(output_dir).expanduser().resolve()
     output_path.mkdir(parents=True, exist_ok=True)
 
     resolved_case_id = case_id or _default_case_id(input_source)
@@ -693,15 +693,15 @@ def process_input(
 
                 return {
                     "title": title,
-                    "markdown_file": str(markdown_path),
-                    "epub_file": str(epub_path),
+                    "markdown_file": str(markdown_path.resolve()),
+                    "epub_file": str(epub_path.resolve()),
                     "cache_hit": False,
                     "case_id": resolved_case_id,
                     "pipeline": "arxiv_html",
                     "html_source_url": html_source_url,
-                    "html_file": str(html_path),
+                    "html_file": str(html_path.resolve()),
                     "html_assets": html_asset_report,
-                    "artifacts_dir": str(artifact_dir),
+                    "artifacts_dir": str(artifact_dir.resolve()),
                     "pandoc": pandoc_result,
                 }
             except Exception as exc:
@@ -739,14 +739,14 @@ def process_input(
 
     return {
         "title": title,
-        "markdown_file": str(markdown_path),
-        "epub_file": str(epub_path),
+        "markdown_file": str(markdown_path.resolve()),
+        "epub_file": str(epub_path.resolve()),
         "cache_hit": cache_hit,
         "case_id": resolved_case_id,
         "pipeline": "pdf_ocr",
         "html_source_url": html_source_url,
         "html_fallback_error": html_fallback_error,
-        "artifacts_dir": str(artifact_dir),
+        "artifacts_dir": str(artifact_dir.resolve()),
         "pandoc": pandoc_result,
     }
 
