@@ -7,6 +7,8 @@ import os
 import re
 import subprocess
 import sys
+import zipfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote_to_bytes, urljoin, urlparse
@@ -27,6 +29,7 @@ ARXIV_NAVIGATION_LINE_RE = re.compile(
 HTML_IMAGE_SRC_RE = re.compile(r"<img[^>]+src=[\"']([^\"']+)[\"']", re.IGNORECASE)
 MARKDOWN_ATTRIBUTE_BLOCK_RE = re.compile(r"\{(?:#[^}]+)?(?:\s*\.[^}\s]+)+\}")
 COLON_FENCE_LINE_RE = re.compile(r"^\s*:{3,}.*$")
+COLON_FENCE_WITH_ID_RE = re.compile(r"^\s*:{3,}\s*\{#([^\s}]+)[^}]*\}\s*$")
 
 
 def _is_url(value: str) -> bool:
@@ -135,6 +138,12 @@ def _fetch_arxiv_html_document(input_source: str, timeout_seconds: int = 20) -> 
 def _normalize_arxiv_html_document(html_document: str) -> str:
     normalized = re.sub(r"<base\b[^>]*>", "", html_document, flags=re.IGNORECASE)
     normalized = re.sub(r"<base\b[^>]*/>", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(
+        r"alt=[\"']Refer to caption[\"']",
+        "alt=\"\"",
+        normalized,
+        flags=re.IGNORECASE,
+    )
     return normalized
 
 
@@ -448,6 +457,9 @@ def _normalize_markdown_images(markdown: str) -> str:
         image_name = Path(image_target).name
         image_stem = Path(image_name).stem
 
+        if alt_text.lower() == "refer to caption":
+            return f"![]({image_target})"
+
         if alt_text in {image_name, image_stem} or FILENAME_ALT_RE.match(alt_text):
             return f"![]({image_target})"
 
@@ -496,7 +508,35 @@ def create_markdown_file(ocr_data: dict[str, Any], output_filename: str | Path) 
     return output_path
 
 
-def _cleanup_arxiv_markdown(markdown: str) -> str:
+def _localize_arxiv_links(markdown: str, html_source_url: str | None) -> str:
+    if not html_source_url:
+        return markdown
+
+    parsed = urlparse(html_source_url)
+    base_path = parsed.path.rstrip("/")
+    base_url = html_source_url.rstrip("/")
+
+    candidates = [
+        f"{base_url}/",
+        base_url,
+        f"https://arxiv.org{base_path}/",
+        f"http://arxiv.org{base_path}/",
+        f"https://arxiv.org{base_path}",
+        f"http://arxiv.org{base_path}",
+        f"{base_path}/",
+        base_path,
+        "https://arxiv.org",
+        "http://arxiv.org",
+    ]
+
+    localized = markdown
+    for candidate in candidates:
+        localized = localized.replace(f"{candidate}#", "#")
+
+    return localized
+
+
+def _cleanup_arxiv_markdown(markdown: str, html_source_url: str | None = None) -> str:
     lines = markdown.splitlines()
 
     first_heading_index = next(
@@ -507,29 +547,89 @@ def _cleanup_arxiv_markdown(markdown: str) -> str:
         lines = lines[first_heading_index:]
 
     cleaned_lines: list[str] = []
+    in_references = False
+
     for line in lines:
         stripped = line.strip()
         if ARXIV_NAVIGATION_LINE_RE.match(stripped):
             continue
+
+        fence_with_id_match = COLON_FENCE_WITH_ID_RE.match(stripped)
+        if fence_with_id_match:
+            cleaned_lines.append(f"<a id=\"{fence_with_id_match.group(1)}\"></a>")
+            cleaned_lines.append("")
+            continue
+
         if COLON_FENCE_LINE_RE.match(stripped):
             continue
 
-        normalized_line = MARKDOWN_ATTRIBUTE_BLOCK_RE.sub("", line)
+        anchor_ids = re.findall(r"\{#([^\s}]+)[^}]*\}", line)
+        normalized_line = re.sub(r"\{#([^\s}]+)[^}]*\}", "", line)
+        normalized_line = MARKDOWN_ATTRIBUTE_BLOCK_RE.sub("", normalized_line)
+
+        for anchor_id in anchor_ids:
+            if not anchor_id.startswith("your-spending-needs-attention"):
+                cleaned_lines.append(f"<a id=\"{anchor_id}\"></a>")
+                cleaned_lines.append("")
+
+        normalized_line = re.sub(r"\[\[([^\[\]]+)\]\]\(([^)]+)\)", r"[\1](\2)", normalized_line)
+        normalized_line = re.sub(r"\]\((#[^)\s]+)\s+\"[^\"]*\"\)", r"](\1)", normalized_line)
+        normalized_line = re.sub(r"\(#(S\d+)\.E\d+(?:\s+\"[^\"]*\")?\)", r"(#\1)", normalized_line)
+
+        if "](" not in normalized_line:
+            normalized_line = re.sub(r"\[\[([^\[\]]+)\]\]", r"\1", normalized_line)
+            normalized_line = re.sub(r"\[(\s*)\[(\s*)", "[", normalized_line)
+            normalized_line = re.sub(r"(\s*)\](\s*)\]", "]", normalized_line)
+            normalized_line = re.sub(r"\]\s*\[", " ", normalized_line)
+
         normalized_line = re.sub(r"^\s*\[\(\d+\)\]\s*(\$\$.*\$\$)\s*$", r"\1", normalized_line)
         normalized_line = re.sub(r"(\$\$[^$]+)\.(\$\$)", r"\1\2", normalized_line)
 
         if re.fullmatch(r"[\s\|+\-]{5,}", normalized_line):
             continue
 
-        normalized_line = re.sub(r"\s{2,}", " ", normalized_line)
-        cleaned_lines.append(normalized_line.rstrip())
+        if re.fullmatch(r"\s*-\s*[•\-–]+\s*", normalized_line):
+            continue
+
+        if re.fullmatch(r"\s*-\s*\(\d+\)\s*", normalized_line):
+            continue
+
+        if re.fullmatch(r"\s*-\s*\[\s*\]\s*", normalized_line):
+            continue
+
+        normalized_line = re.sub(r"\s{2,}", " ", normalized_line).rstrip()
+        normalized_line = re.sub(
+            r"^(#{1,6})\s*\[([0-9]+(?:\.[0-9]+)?\.?\s*)\](.*)$",
+            r"\1 \2\3",
+            normalized_line,
+        )
+
+        if normalized_line == "## References":
+            in_references = True
+
+        if in_references and normalized_line.startswith("-"):
+            reference_line = normalized_line[1:].strip()
+            reference_segments = [segment.strip() for segment in re.findall(r"\[([^\[\]]+)\]", reference_line)]
+            if reference_segments:
+                compact_segments = [segment for segment in reference_segments if segment]
+                if compact_segments and compact_segments[0].startswith("(") and len(compact_segments) == 1:
+                    continue
+                if compact_segments:
+                    normalized_line = "- " + " ".join(compact_segments)
+
+        cleaned_lines.append(normalized_line)
 
     cleaned_markdown = "\n".join(cleaned_lines)
     cleaned_markdown = re.sub(r"\n{3,}", "\n\n", cleaned_markdown).strip()
+    cleaned_markdown = _localize_arxiv_links(cleaned_markdown, html_source_url)
     return cleaned_markdown + "\n"
 
 
-def create_markdown_from_html(html_file: str | Path, output_filename: str | Path) -> Path:
+def create_markdown_from_html(
+    html_file: str | Path,
+    output_filename: str | Path,
+    html_source_url: str | None = None,
+) -> Path:
     html_path = Path(html_file)
     output_path = Path(output_filename)
 
@@ -569,11 +669,35 @@ def create_markdown_from_html(html_file: str | Path, output_filename: str | Path
         )
 
     markdown_text = output_path.read_text(encoding="utf-8")
-    markdown_text = _cleanup_arxiv_markdown(markdown_text)
+    markdown_text = _cleanup_arxiv_markdown(markdown_text, html_source_url=html_source_url)
     markdown_text = _normalize_markdown_images(markdown_text)
     output_path.write_text(markdown_text, encoding="utf-8")
 
     return output_path
+
+
+def _read_epub_metadata_title(epub_file: str | Path) -> str | None:
+    epub_path = Path(epub_file)
+    if not epub_path.exists():
+        return None
+
+    try:
+        with zipfile.ZipFile(epub_path, "r") as archive:
+            container = ET.fromstring(archive.read("META-INF/container.xml"))
+            rootfile = container.find(".//{*}rootfile")
+            if rootfile is None:
+                return None
+            opf_path = rootfile.attrib.get("full-path")
+            if not opf_path:
+                return None
+
+            opf = ET.fromstring(archive.read(opf_path))
+            title_element = opf.find(".//{*}metadata/{*}title")
+            if title_element is None or not title_element.text:
+                return None
+            return title_element.text.strip()
+    except Exception:
+        return None
 
 
 def markdown_to_epub(
@@ -675,7 +799,11 @@ def process_input(
                 )
 
                 markdown_path = artifact_dir / f"{title}.md"
-                create_markdown_from_html(html_path, markdown_path)
+                create_markdown_from_html(
+                    html_path,
+                    markdown_path,
+                    html_source_url=html_source_url,
+                )
 
                 if output_epub is None:
                     epub_path = output_path / f"{title}.epub"
@@ -695,6 +823,7 @@ def process_input(
                     "title": title,
                     "markdown_file": str(markdown_path.resolve()),
                     "epub_file": str(epub_path.resolve()),
+                    "epub_metadata_title": _read_epub_metadata_title(epub_path),
                     "cache_hit": False,
                     "case_id": resolved_case_id,
                     "pipeline": "arxiv_html",
@@ -741,6 +870,7 @@ def process_input(
         "title": title,
         "markdown_file": str(markdown_path.resolve()),
         "epub_file": str(epub_path.resolve()),
+        "epub_metadata_title": _read_epub_metadata_title(epub_path),
         "cache_hit": cache_hit,
         "case_id": resolved_case_id,
         "pipeline": "pdf_ocr",
