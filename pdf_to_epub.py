@@ -321,7 +321,8 @@ def markdown_to_epub(
     md_file: str | Path,
     epub_file: str | Path,
     epub_title: str,
-    author: str,
+    author: str | None = None,
+    include_title_page: bool = False,
 ) -> dict[str, Any]:
     md_path = Path(md_file)
     epub_path = Path(epub_file)
@@ -331,24 +332,29 @@ def markdown_to_epub(
 
     epub_path.parent.mkdir(parents=True, exist_ok=True)
 
+    pandoc_command = [
+        "pandoc",
+        str(md_path),
+        "-o",
+        str(epub_path),
+        "--toc",
+        "--standalone",
+        "--from",
+        "markdown+raw_tex+tex_math_dollars+tex_math_single_backslash",
+        "--mathml",
+        "--resource-path",
+        str(md_path.parent),
+        "--metadata",
+        "title=" + epub_title.replace("_", " "),
+    ]
+
+    if author and author.strip():
+        pandoc_command.extend(["--metadata", f"author={author.strip()}"])
+
+    pandoc_command.append(f"--epub-title-page={'true' if include_title_page else 'false'}")
+
     process = subprocess.run(
-        [
-            "pandoc",
-            str(md_path),
-            "-o",
-            str(epub_path),
-            "--toc",
-            "--standalone",
-            "--from",
-            "markdown+raw_tex+tex_math_dollars+tex_math_single_backslash",
-            "--mathml",
-            "--resource-path",
-            str(md_path.parent),
-            "--metadata",
-            "title=" + epub_title.replace("_", " "),
-            "--metadata",
-            f"author={author}",
-        ],
+        pandoc_command,
         capture_output=True,
         text=True,
         check=False,
@@ -379,7 +385,8 @@ def process_input(
     cache_dir: str | Path | None = None,
     case_id: str | None = None,
     force_ocr: bool = False,
-    author: str = "pdf-to-epub",
+    author: str | None = None,
+    include_title_page: bool = False,
 ) -> dict[str, Any]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -401,7 +408,13 @@ def process_input(
         candidate = Path(output_epub)
         epub_path = candidate if candidate.is_absolute() else output_path / candidate
 
-    pandoc_result = markdown_to_epub(markdown_path, epub_path, title, author=author)
+    pandoc_result = markdown_to_epub(
+        markdown_path,
+        epub_path,
+        title,
+        author=author,
+        include_title_page=include_title_page,
+    )
 
     return {
         "title": title,
@@ -431,7 +444,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--case-id", default=None, help="Stable cache key for repeated conversions")
     parser.add_argument("--force-ocr", action="store_true", help="Ignore OCR cache and call API again")
-    parser.add_argument("--author", default="pdf-to-epub", help="EPUB author metadata")
+    parser.add_argument(
+        "--author",
+        default=None,
+        help="Optional EPUB author metadata (adds a subtitle on some readers)",
+    )
+    parser.add_argument(
+        "--title-page",
+        action="store_true",
+        help="Include generated EPUB title page (disabled by default)",
+    )
     return parser
 
 
@@ -448,6 +470,7 @@ def main() -> None:
             case_id=args.case_id,
             force_ocr=args.force_ocr,
             author=args.author,
+            include_title_page=args.title_page,
         )
         print(json.dumps(result, indent=2))
     except Exception as exc:
