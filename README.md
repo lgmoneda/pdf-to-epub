@@ -8,6 +8,7 @@ Convert academic PDFs (local or URL) into Kindle-friendly EPUBs using OCR + Pand
 - Caches OCR responses for fast iterations
 - Preserves figures and improves math rendering quality
 - Avoids noisy filename captions under images
+- Disables generated EPUB title page by default
 - Includes a benchmark suite (10 ArXiv papers) for regression testing
 - Optional LLM quality judge for visual/reading-order scoring
 
@@ -73,7 +74,9 @@ python pdf_to_epub.py <url_or_pdf> \
   --output-dir output \
   --cache-dir .ocr-cache \
   --case-id custom_case_id \
-  --force-ocr
+  --force-ocr \
+  --author "Optional Author" \
+  --title-page  # only if you want a generated title page
 ```
 
 ## Benchmark feedback loop

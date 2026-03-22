@@ -73,7 +73,6 @@ def run_case(
         cache_dir=cache_dir,
         case_id=case_id,
         force_ocr=force_ocr,
-        author="pdf-to-epub",
     )
 
     markdown_path = Path(conversion_result["markdown_file"])
