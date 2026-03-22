@@ -9,8 +9,9 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote_to_bytes
+from urllib.parse import unquote_to_bytes, urljoin, urlparse
 
+import requests
 from dotenv import load_dotenv
 
 DISPLAY_MATH_RE = re.compile(r"\$\$(.+?)\$\$|\\\[(.+?)\\\]", re.DOTALL)
@@ -19,6 +20,13 @@ SPACED_LETTERS_RE = re.compile(r"\b(?:[A-Za-z]\s+){2,}[A-Za-z]\b")
 DATE_TITLE_RE = re.compile(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$")
 IMAGE_MARKDOWN_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 FILENAME_ALT_RE = re.compile(r"^img[-_\s]?\d+(?:[-_]\d+)?(?:\.[A-Za-z0-9]+)?$", re.IGNORECASE)
+ARXIV_NAVIGATION_LINE_RE = re.compile(
+    r"^\[(?:About arXiv|Contact|Donate|Help|Login|Subscribe|Skip to main content)\]\([^)]*arxiv\.org[^)]*\)$",
+    re.IGNORECASE,
+)
+HTML_IMAGE_SRC_RE = re.compile(r"<img[^>]+src=[\"']([^\"']+)[\"']", re.IGNORECASE)
+MARKDOWN_ATTRIBUTE_BLOCK_RE = re.compile(r"\{(?:#[^}]+)?(?:\s*\.[^}\s]+)+\}")
+COLON_FENCE_LINE_RE = re.compile(r"^\s*:{3,}.*$")
 
 
 def _is_url(value: str) -> bool:
@@ -33,11 +41,158 @@ def _safe_filename(value: str, max_length: int = 80) -> str:
     return cleaned[:max_length]
 
 
+def _slugify(value: str, max_length: int = 80) -> str:
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", value.strip()).strip("-").lower()
+    if not slug:
+        return "untitled"
+    return slug[:max_length].strip("-") or "untitled"
+
+
+def _clean_title(value: str, max_length: int = 140) -> str:
+    cleaned = html.unescape(value)
+    cleaned = cleaned.replace("_", " ")
+    cleaned = cleaned.replace(":", " - ")
+    cleaned = re.sub(r"[<>:\"/\\|?*]+", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .-")
+    if not cleaned:
+        return "Untitled"
+    return cleaned[:max_length].rstrip()
+
+
+def _artifact_dir_for_title(output_dir: Path, case_id: str, title: str) -> Path:
+    case_segment = _safe_filename(case_id, max_length=40)
+    title_segment = _slugify(title, max_length=60)
+    return output_dir / "artifacts" / f"{case_segment}-{title_segment}"
+
+
 def _default_case_id(input_source: str) -> str:
     if _is_url(input_source):
         digest = hashlib.sha1(input_source.encode("utf-8")).hexdigest()[:12]
         return f"url_{digest}"
     return _safe_filename(Path(input_source).stem)
+
+
+def _is_arxiv_url(input_source: str) -> bool:
+    if not _is_url(input_source):
+        return False
+
+    parsed = urlparse(input_source)
+    host = parsed.netloc.lower()
+    return host == "arxiv.org" or host.endswith(".arxiv.org")
+
+
+def _extract_arxiv_id_from_url(input_source: str) -> str | None:
+    if not _is_arxiv_url(input_source):
+        return None
+
+    path = urlparse(input_source).path.strip("/")
+    if not path:
+        return None
+
+    for prefix in ("abs/", "pdf/", "html/"):
+        if path.startswith(prefix):
+            arxiv_id = path[len(prefix) :].strip("/")
+            if prefix == "pdf/" and arxiv_id.endswith(".pdf"):
+                arxiv_id = arxiv_id[:-4]
+            if prefix == "html/" and arxiv_id.endswith(".html"):
+                arxiv_id = arxiv_id[:-5]
+            return arxiv_id or None
+
+    return None
+
+
+def _arxiv_pdf_url(input_source: str) -> str | None:
+    arxiv_id = _extract_arxiv_id_from_url(input_source)
+    if not arxiv_id:
+        return None
+    return f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+
+
+def _fetch_arxiv_html_document(input_source: str, timeout_seconds: int = 20) -> tuple[str | None, str | None]:
+    arxiv_id = _extract_arxiv_id_from_url(input_source)
+    if not arxiv_id:
+        return None, None
+
+    html_url = f"https://arxiv.org/html/{arxiv_id}"
+    try:
+        response = requests.get(
+            html_url,
+            timeout=timeout_seconds,
+            headers={"User-Agent": "pdf-to-epub/1.0"},
+            allow_redirects=True,
+        )
+    except requests.RequestException:
+        return None, None
+
+    content_type = response.headers.get("content-type", "").lower()
+    looks_like_html = "text/html" in content_type or "<html" in response.text[:500].lower()
+    if response.status_code != 200 or not looks_like_html:
+        return None, None
+
+    return html_url, response.text
+
+
+def _normalize_arxiv_html_document(html_document: str) -> str:
+    normalized = re.sub(r"<base\b[^>]*>", "", html_document, flags=re.IGNORECASE)
+    normalized = re.sub(r"<base\b[^>]*/>", "", normalized, flags=re.IGNORECASE)
+    return normalized
+
+
+def _download_html_image_assets(
+    html_document: str,
+    base_url: str,
+    target_dir: Path,
+    timeout_seconds: int = 20,
+) -> dict[str, Any]:
+    downloaded = 0
+    skipped = 0
+    failed = 0
+
+    base_with_slash = base_url if base_url.endswith("/") else f"{base_url}/"
+    image_sources = sorted(set(HTML_IMAGE_SRC_RE.findall(html_document)))
+
+    for source in image_sources:
+        if source.startswith("data:"):
+            skipped += 1
+            continue
+
+        if source.startswith("http://") or source.startswith("https://"):
+            asset_url = source
+            local_rel = urlparse(source).path.lstrip("/")
+        else:
+            asset_url = urljoin(base_with_slash, source)
+            local_rel = source.split("?", 1)[0].split("#", 1)[0].lstrip("/")
+
+        if not local_rel:
+            skipped += 1
+            continue
+
+        destination = target_dir / local_rel
+        if destination.exists():
+            skipped += 1
+            continue
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            response = requests.get(
+                asset_url,
+                timeout=timeout_seconds,
+                headers={"User-Agent": "pdf-to-epub/1.0"},
+                allow_redirects=True,
+            )
+            response.raise_for_status()
+            destination.write_bytes(response.content)
+            downloaded += 1
+        except (requests.RequestException, OSError):
+            failed += 1
+
+    return {
+        "total_image_references": len(image_sources),
+        "downloaded": downloaded,
+        "skipped": skipped,
+        "failed": failed,
+    }
 
 
 def _get_mistral_client() -> Any:
@@ -116,8 +271,30 @@ def extract_title_from_ocr(ocr_data: dict[str, Any]) -> str:
                 continue
             if not re.search(r"[A-Za-z]", title_candidate):
                 continue
-            return _safe_filename(title_candidate, max_length=75)
-    return "untitled"
+            return _clean_title(title_candidate, max_length=120)
+    return "Untitled"
+
+
+def extract_title_from_html_document(html_document: str) -> str:
+    citation_title_patterns = [
+        r"<meta[^>]+name=[\"']citation_title[\"'][^>]+content=[\"']([^\"']+)[\"']",
+        r"<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+name=[\"']citation_title[\"']",
+    ]
+    for pattern in citation_title_patterns:
+        match = re.search(pattern, html_document, flags=re.IGNORECASE)
+        if match:
+            title = re.sub(r"\s+", " ", html.unescape(match.group(1))).strip()
+            if title and not DATE_TITLE_RE.match(title):
+                return _clean_title(title, max_length=120)
+
+    title_match = re.search(r"<title[^>]*>(.*?)</title>", html_document, flags=re.IGNORECASE | re.DOTALL)
+    if title_match:
+        title = re.sub(r"\s+", " ", html.unescape(title_match.group(1))).strip()
+        title = re.sub(r"\s*\|\s*arXiv.*$", "", title, flags=re.IGNORECASE)
+        if title and not DATE_TITLE_RE.match(title):
+            return _clean_title(title, max_length=120)
+
+    return "Untitled"
 
 
 def run_ocr(
@@ -232,6 +409,8 @@ def _should_demote_from_math(value: str) -> bool:
 
 def _normalize_markdown_math(markdown: str) -> str:
     normalized = html.unescape(markdown)
+    normalized = re.sub(r"\$`([^`]+)`\$", r"$\1$", normalized)
+    normalized = re.sub(r"\$\$`([^`]+)`\$\$", r"$$\1$$", normalized)
     normalized = re.sub(r"(?<=\d)\$\$(?=\d)", "×", normalized)
 
     def _replace_display(match: re.Match[str]) -> str:
@@ -317,6 +496,86 @@ def create_markdown_file(ocr_data: dict[str, Any], output_filename: str | Path) 
     return output_path
 
 
+def _cleanup_arxiv_markdown(markdown: str) -> str:
+    lines = markdown.splitlines()
+
+    first_heading_index = next(
+        (index for index, line in enumerate(lines) if line.startswith("# ")),
+        0,
+    )
+    if first_heading_index > 0:
+        lines = lines[first_heading_index:]
+
+    cleaned_lines: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if ARXIV_NAVIGATION_LINE_RE.match(stripped):
+            continue
+        if COLON_FENCE_LINE_RE.match(stripped):
+            continue
+
+        normalized_line = MARKDOWN_ATTRIBUTE_BLOCK_RE.sub("", line)
+        normalized_line = re.sub(r"^\s*\[\(\d+\)\]\s*(\$\$.*\$\$)\s*$", r"\1", normalized_line)
+        normalized_line = re.sub(r"(\$\$[^$]+)\.(\$\$)", r"\1\2", normalized_line)
+
+        if re.fullmatch(r"[\s\|+\-]{5,}", normalized_line):
+            continue
+
+        normalized_line = re.sub(r"\s{2,}", " ", normalized_line)
+        cleaned_lines.append(normalized_line.rstrip())
+
+    cleaned_markdown = "\n".join(cleaned_lines)
+    cleaned_markdown = re.sub(r"\n{3,}", "\n\n", cleaned_markdown).strip()
+    return cleaned_markdown + "\n"
+
+
+def create_markdown_from_html(html_file: str | Path, output_filename: str | Path) -> Path:
+    html_path = Path(html_file)
+    output_path = Path(output_filename)
+
+    if not html_path.exists():
+        raise FileNotFoundError(f"HTML file '{html_path}' not found.")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    media_dir = output_path.parent / f"{output_path.stem}_media"
+
+    process = subprocess.run(
+        [
+            "pandoc",
+            str(html_path),
+            "-o",
+            str(output_path),
+            "--from",
+            "html",
+            "--to",
+            "markdown+tex_math_dollars+fenced_divs+bracketed_spans+header_attributes+link_attributes",
+            "--wrap=none",
+            "--resource-path",
+            str(html_path.parent),
+            "--extract-media",
+            str(media_dir),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    if process.returncode != 0:
+        raise subprocess.CalledProcessError(
+            returncode=process.returncode,
+            cmd=process.args,
+            output=process.stdout,
+            stderr=process.stderr,
+        )
+
+    markdown_text = output_path.read_text(encoding="utf-8")
+    markdown_text = _cleanup_arxiv_markdown(markdown_text)
+    markdown_text = _normalize_markdown_images(markdown_text)
+    output_path.write_text(markdown_text, encoding="utf-8")
+
+    return output_path
+
+
 def markdown_to_epub(
     md_file: str | Path,
     epub_file: str | Path,
@@ -340,12 +599,12 @@ def markdown_to_epub(
         "--toc",
         "--standalone",
         "--from",
-        "markdown+raw_tex+tex_math_dollars+tex_math_single_backslash",
+        "markdown+raw_tex+raw_html+fenced_divs+bracketed_spans+header_attributes+link_attributes+tex_math_dollars+tex_math_single_backslash",
         "--mathml",
         "--resource-path",
         str(md_path.parent),
         "--metadata",
-        "title=" + epub_title.replace("_", " "),
+        "title=" + epub_title,
     ]
 
     if author and author.strip():
@@ -387,19 +646,81 @@ def process_input(
     force_ocr: bool = False,
     author: str | None = None,
     include_title_page: bool = False,
+    force_pdf: bool = False,
 ) -> dict[str, Any]:
-    output_path = Path(output_dir)
+    output_path = Path(output_dir).expanduser().resolve()
     output_path.mkdir(parents=True, exist_ok=True)
 
+    resolved_case_id = case_id or _default_case_id(input_source)
+
+    html_source_url: str | None = None
+    html_fallback_error: str | None = None
+
+    if not force_pdf:
+        html_source_url, html_document = _fetch_arxiv_html_document(input_source)
+        if html_source_url and html_document:
+            try:
+                normalized_html_document = _normalize_arxiv_html_document(html_document)
+                title = extract_title_from_html_document(normalized_html_document)
+                artifact_dir = _artifact_dir_for_title(output_path, resolved_case_id, title)
+                artifact_dir.mkdir(parents=True, exist_ok=True)
+
+                html_path = artifact_dir / f"{title}.html"
+                html_path.write_text(normalized_html_document, encoding="utf-8")
+
+                html_asset_report = _download_html_image_assets(
+                    html_document=normalized_html_document,
+                    base_url=html_source_url,
+                    target_dir=artifact_dir,
+                )
+
+                markdown_path = artifact_dir / f"{title}.md"
+                create_markdown_from_html(html_path, markdown_path)
+
+                if output_epub is None:
+                    epub_path = output_path / f"{title}.epub"
+                else:
+                    candidate = Path(output_epub)
+                    epub_path = candidate if candidate.is_absolute() else output_path / candidate
+
+                pandoc_result = markdown_to_epub(
+                    markdown_path,
+                    epub_path,
+                    title,
+                    author=author,
+                    include_title_page=include_title_page,
+                )
+
+                return {
+                    "title": title,
+                    "markdown_file": str(markdown_path.resolve()),
+                    "epub_file": str(epub_path.resolve()),
+                    "cache_hit": False,
+                    "case_id": resolved_case_id,
+                    "pipeline": "arxiv_html",
+                    "html_source_url": html_source_url,
+                    "html_file": str(html_path.resolve()),
+                    "html_assets": html_asset_report,
+                    "artifacts_dir": str(artifact_dir.resolve()),
+                    "pandoc": pandoc_result,
+                }
+            except Exception as exc:
+                html_fallback_error = str(exc)
+
+    pdf_input_source = _arxiv_pdf_url(input_source) or input_source
+
     ocr_data, cache_hit, resolved_case_id = run_ocr(
-        input_source=input_source,
+        input_source=pdf_input_source,
         cache_dir=cache_dir,
-        case_id=case_id,
+        case_id=resolved_case_id,
         force_ocr=force_ocr,
     )
 
     title = extract_title_from_ocr(ocr_data)
-    markdown_path = output_path / f"{title}.md"
+    artifact_dir = _artifact_dir_for_title(output_path, resolved_case_id, title)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    markdown_path = artifact_dir / f"{title}.md"
     create_markdown_file(ocr_data, markdown_path)
 
     if output_epub is None:
@@ -418,24 +739,34 @@ def process_input(
 
     return {
         "title": title,
-        "markdown_file": str(markdown_path),
-        "epub_file": str(epub_path),
+        "markdown_file": str(markdown_path.resolve()),
+        "epub_file": str(epub_path.resolve()),
         "cache_hit": cache_hit,
         "case_id": resolved_case_id,
+        "pipeline": "pdf_ocr",
+        "html_source_url": html_source_url,
+        "html_fallback_error": html_fallback_error,
+        "artifacts_dir": str(artifact_dir.resolve()),
         "pandoc": pandoc_result,
     }
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Convert PDF (local path or URL) to EPUB using Mistral OCR and Pandoc."
+        description=(
+            "Convert papers to EPUB, auto-using arXiv HTML when available and "
+            "falling back to PDF OCR."
+        )
     )
-    parser.add_argument("input_source", help="PDF file path or URL")
+    parser.add_argument(
+        "input_source",
+        help="PDF file path or URL (arXiv URLs auto-use HTML when available)",
+    )
     parser.add_argument("output_epub", nargs="?", default=None, help="Output EPUB file name/path")
     parser.add_argument(
         "--output-dir",
         default="output",
-        help="Directory for generated markdown/images and relative EPUB output path",
+        help="Directory for EPUB output and intermediate conversion artifacts",
     )
     parser.add_argument(
         "--cache-dir",
@@ -454,6 +785,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include generated EPUB title page (disabled by default)",
     )
+    parser.add_argument(
+        "--force-pdf",
+        action="store_true",
+        help="Force OCR pipeline from PDF even when an arXiv HTML version is available",
+    )
     return parser
 
 
@@ -471,6 +807,7 @@ def main() -> None:
             force_ocr=args.force_ocr,
             author=args.author,
             include_title_page=args.title_page,
+            force_pdf=args.force_pdf,
         )
         print(json.dumps(result, indent=2))
     except Exception as exc:

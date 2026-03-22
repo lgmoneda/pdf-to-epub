@@ -225,6 +225,29 @@
           "References"
         ]
       }
+    },
+    {
+      "id": "your_spending_needs_attention",
+      "title": "Your Spending Needs Attention: Modeling Financial Habits with Transformers",
+      "input_source": "https://arxiv.org/pdf/2507.23267v1",
+      "pdf_file": "pdfs/2507.23267v1.pdf",
+      "source_url": "https://arxiv.org/pdf/2507.23267v1.pdf",
+      "expectations": {
+        "two_column_pdf": true,
+        "has_math": true,
+        "min_image_files": 2,
+        "required_phrases": [
+          "Your Spending Needs Attention",
+          "Abstract",
+          "Introduction",
+          "References"
+        ],
+        "ordered_phrases": [
+          "Abstract",
+          "Introduction",
+          "References"
+        ]
+      }
     }
   ]
 }

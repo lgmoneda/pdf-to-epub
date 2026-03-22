@@ -5,6 +5,7 @@ Convert academic PDFs (local or URL) into Kindle-friendly EPUBs using OCR + Pand
 ## Features
 
 - Converts a PDF URL or local PDF file to EPUB
+- Auto-detects arXiv HTML pages and uses an HTML → Markdown → EPUB pipeline when available
 - Caches OCR responses for fast iterations
 - Preserves figures and improves math rendering quality
 - Avoids noisy filename captions under images
@@ -78,7 +79,7 @@ echo 'MISTRAL_API_KEY=your_key_here' > .env
 
 ## Usage
 
-Convert from URL:
+Convert from URL (auto-uses arXiv HTML when available):
 
 ```bash
 python pdf_to_epub.py https://arxiv.org/pdf/2511.10395
@@ -90,7 +91,10 @@ Convert from local file:
 python pdf_to_epub.py ~/Downloads/paper.pdf
 ```
 
-Output files are saved to `output/` by default.
+Output files are saved to `output/` by default:
+
+- Final `.epub` file is placed directly under `output/`
+- Intermediate files (`.md`, `.html`, images/media) are placed under `output/artifacts/`
 
 Useful options:
 
@@ -101,7 +105,8 @@ python pdf_to_epub.py <url_or_pdf> \
   --case-id custom_case_id \
   --force-ocr \
   --author "Optional Author" \
-  --title-page  # only if you want a generated title page
+  --title-page \
+  --force-pdf  # force OCR from PDF even if arXiv HTML exists
 ```
 
 ## Benchmark feedback loop
