@@ -30,6 +30,9 @@ python benchmark/download_testset.py
 
 Manifest location: `testset/manifest.json`.
 
+Manifest cases can optionally define `input_source` (URL/path passed directly to `process_input`).
+If omitted, benchmark uses downloaded `pdf_file` as input.
+
 ## Run benchmark
 
 ```bash
@@ -52,6 +55,19 @@ Force fresh OCR:
 
 ```bash
 python benchmark/run_benchmark.py --force-ocr
+```
+
+Force PDF OCR pipeline (disable HTML-first mode):
+
+```bash
+python benchmark/run_benchmark.py --force-pdf
+```
+
+Compare HTML-first vs forced PDF for one case:
+
+```bash
+python benchmark/run_benchmark.py --case your_spending_needs_attention
+python benchmark/run_benchmark.py --case your_spending_needs_attention --force-pdf
 ```
 
 ## Output structure

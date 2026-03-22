@@ -56,6 +56,7 @@ def run_case(
     cache_dir: Path,
     force_ocr: bool,
     force_download: bool,
+    force_pdf: bool,
     use_llm_judge: bool,
     openai_model: str,
 ) -> dict[str, Any]:
@@ -63,16 +64,25 @@ def run_case(
     case_output_dir = run_dir / case_id
     case_output_dir.mkdir(parents=True, exist_ok=True)
 
-    pdf_path = maybe_download_pdf(manifest_path, case, force_download=force_download)
+    input_source = case.get("input_source")
+    pdf_path: Path | None = None
+
+    if input_source:
+        resolved_input_source = str(input_source)
+    else:
+        pdf_path = maybe_download_pdf(manifest_path, case, force_download=force_download)
+        resolved_input_source = str(pdf_path)
+
     output_epub = case_output_dir / f"{case_id}.epub"
 
     conversion_result = process_input(
-        input_source=str(pdf_path),
+        input_source=resolved_input_source,
         output_epub=output_epub,
         output_dir=case_output_dir,
         cache_dir=cache_dir,
         case_id=case_id,
         force_ocr=force_ocr,
+        force_pdf=force_pdf or bool(case.get("force_pdf", False)),
     )
 
     markdown_path = Path(conversion_result["markdown_file"])
@@ -110,7 +120,8 @@ def run_case(
     return {
         "id": case_id,
         "title": case.get("title", case_id),
-        "source_pdf": str(pdf_path),
+        "source_input": resolved_input_source,
+        "source_pdf": str(pdf_path) if pdf_path else None,
         "conversion": conversion_result,
         "critical_failures": validation.get("critical_failures", []),
         "validation": validation,
@@ -139,6 +150,11 @@ def main() -> None:
     )
     parser.add_argument("--force-ocr", action="store_true", help="Force OCR refresh for all cases")
     parser.add_argument("--force-download", action="store_true", help="Force PDF re-download")
+    parser.add_argument(
+        "--force-pdf",
+        action="store_true",
+        help="Force PDF OCR pipeline for all selected cases",
+    )
     parser.add_argument(
         "--case",
         action="append",
@@ -191,15 +207,22 @@ def main() -> None:
                 cache_dir=cache_dir,
                 force_ocr=args.force_ocr,
                 force_download=args.force_download,
+                force_pdf=args.force_pdf,
                 use_llm_judge=args.llm_judge,
                 openai_model=args.openai_model,
             )
         except Exception as exc:
             traceback.print_exc()
+            fallback_source_pdf = (
+                str(resolve_pdf_path(manifest_path, case))
+                if case.get("pdf_file")
+                else None
+            )
             result = {
                 "id": case_id,
                 "title": case.get("title", case_id),
-                "source_pdf": str(resolve_pdf_path(manifest_path, case)),
+                "source_input": str(case.get("input_source") or fallback_source_pdf or ""),
+                "source_pdf": fallback_source_pdf,
                 "conversion": None,
                 "critical_failures": ["benchmark_execution_failed"],
                 "validation": {"error": str(exc)},
