@@ -27,6 +27,7 @@ ARXIV_NAVIGATION_LINE_RE = re.compile(
 HTML_IMAGE_SRC_RE = re.compile(r"<img[^>]+src=[\"']([^\"']+)[\"']", re.IGNORECASE)
 MARKDOWN_ATTRIBUTE_BLOCK_RE = re.compile(r"\{(?:#[^}]+)?(?:\s*\.[^}\s]+)+\}")
 COLON_FENCE_LINE_RE = re.compile(r"^\s*:{3,}.*$")
+COLON_FENCE_WITH_ID_RE = re.compile(r"^\s*:{3,}\s*\{#([^\s}]+)[^}]*\}\s*$")
 
 
 def _is_url(value: str) -> bool:
@@ -496,7 +497,35 @@ def create_markdown_file(ocr_data: dict[str, Any], output_filename: str | Path) 
     return output_path
 
 
-def _cleanup_arxiv_markdown(markdown: str) -> str:
+def _localize_arxiv_links(markdown: str, html_source_url: str | None) -> str:
+    if not html_source_url:
+        return markdown
+
+    parsed = urlparse(html_source_url)
+    base_path = parsed.path.rstrip("/")
+    base_url = html_source_url.rstrip("/")
+
+    candidates = [
+        f"{base_url}/",
+        base_url,
+        f"https://arxiv.org{base_path}/",
+        f"http://arxiv.org{base_path}/",
+        f"https://arxiv.org{base_path}",
+        f"http://arxiv.org{base_path}",
+        f"{base_path}/",
+        base_path,
+        "https://arxiv.org",
+        "http://arxiv.org",
+    ]
+
+    localized = markdown
+    for candidate in candidates:
+        localized = localized.replace(f"{candidate}#", "#")
+
+    return localized
+
+
+def _cleanup_arxiv_markdown(markdown: str, html_source_url: str | None = None) -> str:
     lines = markdown.splitlines()
 
     first_heading_index = next(
@@ -511,6 +540,12 @@ def _cleanup_arxiv_markdown(markdown: str) -> str:
         stripped = line.strip()
         if ARXIV_NAVIGATION_LINE_RE.match(stripped):
             continue
+
+        fence_with_id_match = COLON_FENCE_WITH_ID_RE.match(stripped)
+        if fence_with_id_match:
+            cleaned_lines.append(f"<a id=\"{fence_with_id_match.group(1)}\"></a>")
+            continue
+
         if COLON_FENCE_LINE_RE.match(stripped):
             continue
 
@@ -526,10 +561,15 @@ def _cleanup_arxiv_markdown(markdown: str) -> str:
 
     cleaned_markdown = "\n".join(cleaned_lines)
     cleaned_markdown = re.sub(r"\n{3,}", "\n\n", cleaned_markdown).strip()
+    cleaned_markdown = _localize_arxiv_links(cleaned_markdown, html_source_url)
     return cleaned_markdown + "\n"
 
 
-def create_markdown_from_html(html_file: str | Path, output_filename: str | Path) -> Path:
+def create_markdown_from_html(
+    html_file: str | Path,
+    output_filename: str | Path,
+    html_source_url: str | None = None,
+) -> Path:
     html_path = Path(html_file)
     output_path = Path(output_filename)
 
@@ -569,7 +609,7 @@ def create_markdown_from_html(html_file: str | Path, output_filename: str | Path
         )
 
     markdown_text = output_path.read_text(encoding="utf-8")
-    markdown_text = _cleanup_arxiv_markdown(markdown_text)
+    markdown_text = _cleanup_arxiv_markdown(markdown_text, html_source_url=html_source_url)
     markdown_text = _normalize_markdown_images(markdown_text)
     output_path.write_text(markdown_text, encoding="utf-8")
 
@@ -675,7 +715,11 @@ def process_input(
                 )
 
                 markdown_path = artifact_dir / f"{title}.md"
-                create_markdown_from_html(html_path, markdown_path)
+                create_markdown_from_html(
+                    html_path,
+                    markdown_path,
+                    html_source_url=html_source_url,
+                )
 
                 if output_epub is None:
                     epub_path = output_path / f"{title}.epub"
