@@ -570,13 +570,17 @@ def _cleanup_arxiv_markdown(markdown: str, html_source_url: str | None = None) -
         for anchor_id in anchor_ids:
             if not anchor_id.startswith("your-spending-needs-attention"):
                 cleaned_lines.append(f"<a id=\"{anchor_id}\"></a>")
+                cleaned_lines.append("")
 
-        normalized_line = re.sub(r"\[\[([^\[\]]+)\]\]\((#[^)]+)\)", r"[\1](\2)", normalized_line)
-        normalized_line = re.sub(r"\[\[([^\[\]]+)\]\]", r"\1", normalized_line)
+        normalized_line = re.sub(r"\[\[([^\[\]]+)\]\]\(([^)]+)\)", r"[\1](\2)", normalized_line)
+        normalized_line = re.sub(r"\]\((#[^)\s]+)\s+\"[^\"]*\"\)", r"](\1)", normalized_line)
+        normalized_line = re.sub(r"\(#(S\d+)\.E\d+(?:\s+\"[^\"]*\")?\)", r"(#\1)", normalized_line)
 
-        normalized_line = re.sub(r"\[(\s*)\[(\s*)", "[", normalized_line)
-        normalized_line = re.sub(r"(\s*)\](\s*)\]", "]", normalized_line)
-        normalized_line = re.sub(r"\]\s*\[", " ", normalized_line)
+        if "](" not in normalized_line:
+            normalized_line = re.sub(r"\[\[([^\[\]]+)\]\]", r"\1", normalized_line)
+            normalized_line = re.sub(r"\[(\s*)\[(\s*)", "[", normalized_line)
+            normalized_line = re.sub(r"(\s*)\](\s*)\]", "]", normalized_line)
+            normalized_line = re.sub(r"\]\s*\[", " ", normalized_line)
 
         normalized_line = re.sub(r"^\s*\[\(\d+\)\]\s*(\$\$.*\$\$)\s*$", r"\1", normalized_line)
         normalized_line = re.sub(r"(\$\$[^$]+)\.(\$\$)", r"\1\2", normalized_line)
@@ -594,6 +598,11 @@ def _cleanup_arxiv_markdown(markdown: str, html_source_url: str | None = None) -
             continue
 
         normalized_line = re.sub(r"\s{2,}", " ", normalized_line).rstrip()
+        normalized_line = re.sub(
+            r"^(#{1,6})\s*\[([0-9]+(?:\.[0-9]+)?\.?\s*)\](.*)$",
+            r"\1 \2\3",
+            normalized_line,
+        )
 
         if normalized_line == "## References":
             in_references = True
